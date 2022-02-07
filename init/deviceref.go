@@ -19,6 +19,8 @@ const (
 	refGptLabel
 	refFsUUID
 	refFsLabel
+	refHwPath
+	refWwID
 )
 
 // The are many ways a user can specify root partition (using name, fs uuid, fs label, gpt attribute, ...).
@@ -112,7 +114,10 @@ func (d *deviceRef) dependsOnGpt() bool {
 	return d.format == refGptType ||
 		d.format == refGptUUID ||
 		d.format == refGptUUIDPartoff ||
-		d.format == refGptLabel
+		d.format == refGptLabel ||
+		// both hwpath and wwid might include the parent device reference + "-partNN" suffix
+		d.format == refHwPath ||
+		d.format == refWwID
 }
 
 // checks whether given partition table contains active EFI service partition
@@ -198,6 +203,22 @@ func parseDeviceRef(param string) (*deviceRef, error) {
 	if strings.HasPrefix(param, "/dev/disk/by-partlabel/") {
 		label := strings.TrimPrefix(param, "/dev/disk/by-partlabel/")
 		return &deviceRef{refGptLabel, label}, nil
+	}
+	if strings.HasPrefix(param, "HWPATH=") {
+		path := strings.TrimPrefix(param, "HWPATH=")
+		return &deviceRef{refHwPath, path}, nil
+	}
+	if strings.HasPrefix(param, "/dev/disk/by-path/") {
+		path := strings.TrimPrefix(param, "/dev/disk/by-path/")
+		return &deviceRef{refHwPath, path}, nil
+	}
+	if strings.HasPrefix(param, "WWID=") {
+		id := strings.TrimPrefix(param, "WWID=")
+		return &deviceRef{refWwID, id}, nil
+	}
+	if strings.HasPrefix(param, "/dev/disk/by-id/") {
+		id := strings.TrimPrefix(param, "/dev/disk/by-id/")
+		return &deviceRef{refWwID, id}, nil
 	}
 	if strings.HasPrefix(param, "/dev/") {
 		return &deviceRef{refPath, param}, nil

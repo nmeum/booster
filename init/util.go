@@ -174,3 +174,12 @@ func check(err error) {
 		severe("%v", err)
 	}
 }
+
+func sliceContains(arr []string, val string) bool {
+	for _, a := range arr {
+		if a == val {
+			return true
+		}
+	}
+	return false
+}
