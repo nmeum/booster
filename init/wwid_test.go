@@ -18,6 +18,9 @@ func TestHostDeviceWWID(t *testing.T) {
 		sysfs, err := sysfsPathForBlock(e.Name())
 		require.NoError(t, err)
 		wwids, err := wwid(sysfs)
+		if os.IsPermission(err) {
+			t.Skip("test requires root permission")
+		}
 		require.NoError(t, err)
 		if wwids == nil {
 			continue // the block has no wwids

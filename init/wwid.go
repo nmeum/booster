@@ -1,6 +1,10 @@
 package main
 
 import (
+	"bytes"
+	"encoding/binary"
+	"fmt"
+	"github.com/anatol/smart.go"
 	"path"
 	"strings"
 )
@@ -13,25 +17,21 @@ func wwid(device string) ([]string, error) {
 	name := path.Base(device)
 
 	if strings.HasPrefix(name, "nvme") {
-		// wwid attribute
-		id, err := sysfsAttributeValue(device, "wwid")
+		n, err := smart.OpenNVMe("/dev/" + name)
 		if err != nil {
 			return nil, err
 		}
 
-		ids = append(ids, "nvme-"+id)
+		c, nss, err := n.Identify()
+		if err != nil {
+			return nil, err
+		}
+		wwid := binary.BigEndian.Uint64(nss[0].Eui64[:])
+		ids = append(ids, fmt.Sprintf("nvme-eui.%016x", wwid))
 
 		// serial
-		model, err := sysfsAttributeValue(device, "model")
-		if err != nil {
-			return nil, err
-		}
-		model = strings.ReplaceAll(strings.TrimSpace(model), " ", "_")
-		serial, err := sysfsAttributeValue(device, "serial")
-		if err != nil {
-			return nil, err
-		}
-		serial = strings.ReplaceAll(strings.TrimSpace(serial), " ", "_")
+		model := strings.ReplaceAll(string(bytes.TrimSpace(c.ModelNumber[:])), " ", "_")
+		serial := strings.ReplaceAll(string(bytes.TrimSpace(c.SerialNumber[:])), " ", "_")
 		ids = append(ids, "nvme-"+model+"_"+serial)
 	} else if strings.HasPrefix(name, "dm-") {
 		name, err := sysfsAttributeValue(device+"/dm", "name")
@@ -46,47 +46,48 @@ func wwid(device string) ([]string, error) {
 		}
 		ids = append(ids, "dm-uuid-"+uuid)
 	} else if strings.HasPrefix(name, "sd") || strings.HasPrefix(name, "sr") {
-		subsystems, err := sysfsSubsystems(device)
+		dev, err := smart.Open("/dev/" + name)
 		if err != nil {
 			return nil, err
 		}
 
-		// serial
-		vendor, err := sysfsAttributeValue(device, "vendor")
-		if err != nil {
-			return nil, err
-		}
-		vendor = strings.ReplaceAll(vendor, " ", "_")
-		model, err := sysfsAttributeValue(device, "model")
-		if err != nil {
-			return nil, err
-		}
-		model = strings.ReplaceAll(model, " ", "_")
-		serial, err := sysfsAttributeValue(device, "serial")
-		if err != nil {
-			return nil, err
-		}
+		switch dev.Type() {
+		case "sata":
+			dev := dev.(*smart.SataDevice)
+			i, err := dev.Identify()
+			if err != nil {
+				return nil, err
+			}
 
-		bus := "scsi"
-		if subsystems["usb"] {
-			bus = "usb"
-		}
-		target := "0"
-		lun := "0"
-		instanceID := target + ":" + lun
+			model := strings.ReplaceAll(i.ModelNumber(), " ", "_")
+			serial := strings.ReplaceAll(i.SerialNumber(), " ", "_")
+			ids = append(ids, "ata-"+model+"_"+serial)
 
-		ids = append(ids, bus+"-"+vendor+"_"+model+"_"+serial+"-"+instanceID)
+			ids = append(ids, fmt.Sprintf("wwn-%#016x", i.WWN()))
+		case "scsi":
+			dev := dev.(*smart.ScsiDevice)
+			_, err := dev.Inquiry()
+			if err != nil {
+				return nil, err
+			}
 
-		// wwid
-		wwid, err := sysfsAttributeValue(device, "wwid")
-		if err != nil {
-			return nil, err
-		}
-		if strings.HasPrefix(wwid, "naa.") {
-			wwid = "0x" + wwid[4:]
-		}
+			bus := "scsi"
+			subsystems, err := sysfsSubsystems(device)
+			if err != nil {
+				return nil, err
+			}
+			if subsystems["usb"] {
+				bus = "usb"
+			}
+			target := "0"
+			lun := "0"
+			instanceID := target + ":" + lun
 
-		ids = append(ids, "wwn-"+wwid)
+			_ = bus
+			_ = instanceID
+		default:
+			return nil, fmt.Errorf("unknow S.M.A.R.T. device type: %s", dev.Type())
+		}
 	}
 
 	return ids, nil
